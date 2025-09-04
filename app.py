@@ -674,5 +674,5 @@ if check_password():
                 """, unsafe_allow_html=True)
     
     else:
-        st.warning("No data files found. Please ensure the following files exist in the data folder:")
-        st.info("• data/qa_data.xlsx\n• data/summary_data.xlsx\n• data/classification_data.xlsx")
+        st.warning("No data files found. Please ensure the following files exist in the project directory:")
+        st.info("• qa_data.xlsx\n• summary_data.xlsx\n• classification_data.xlsx")
