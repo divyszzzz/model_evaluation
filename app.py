@@ -142,6 +142,14 @@ if check_password():
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
         
+        .mortgage-section {
+            background: rgba(255, 243, 205, 0.5);
+            padding: 1.5rem;
+            border-radius: 15px;
+            border: 2px solid rgba(255, 193, 7, 0.3);
+            margin: 2rem 0;
+        }
+        
         /* Hide streamlit menu */
         #MainMenu {visibility: hidden;}
         header {visibility: hidden;}
@@ -149,7 +157,7 @@ if check_password():
     </style>
     """, unsafe_allow_html=True)
 
-    # Model configurations - NOW 6 MODELS INCLUDING NEW V2_BASE_CPT_RESIDUAL_DPO_RUN1
+    # Model configurations - 6 MODELS INCLUDING NEW V2_BASE_CPT_RESIDUAL_DPO_RUN1
     MODEL_COLORS = {
         'MODEL A': '#FF6B6B',
         'MODEL B': '#4ECDC4', 
@@ -166,6 +174,17 @@ if check_password():
         'MODEL D': 'V2_BASE_CPT_SFT_DPO_RUN1',
         'MODEL F': 'V2_BASE_CPT_RESIDUAL',
         'MODEL J': 'V2_BASE_CPT_RESIDUAL_DPO_RUN1'  # New model
+    }
+
+    # Mortgage Terms Model configurations
+    MORTGAGE_COLORS = {
+        'LLaMA': '#FF9800',  # Orange
+        'DPO': '#9C27B0'     # Purple
+    }
+
+    MORTGAGE_NAMES = {
+        'LLaMA': 'LLaMA3.1-8B-Instruct',
+        'DPO': 'DPO Model'
     }
 
     # Column mappings - UPDATED FOR NEW 6-MODEL STRUCTURE
@@ -226,11 +245,17 @@ if check_password():
         }
     }
 
-    # Data file paths - Updated to use new files
+    # Data file paths - CORRECTED to match your actual files
     DATA_FILES = {
-        'qa': 'qa_data_judge_7models_qna_1to5.xlsx',
-        'summary': 'summary_data_judge_7models_summary_1to5.xlsx',
-        'classification': 'classification_data_judge_7models_classification_1to5.xlsx'
+        'qa': 'data/qa_data.xlsx',
+        'summary': 'data/summary_data.xlsx',
+        'classification': 'data/classification_data.xlsx'
+    }
+
+    # Mortgage Terms Data Files
+    MORTGAGE_FILES = {
+        'judge': 'mortgage_terms_judge_evaluation.xlsx',
+        'bert': 'mortgage_terms_bertscore_evaluation.xlsx'
     }
 
     @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -258,6 +283,31 @@ if check_password():
         
         return datasets, file_status
 
+    @st.cache_data(ttl=300)  # Cache for 5 minutes
+    def load_mortgage_data():
+        """Load mortgage terms evaluation data"""
+        mortgage_data = {}
+        mortgage_status = {}
+        
+        for data_type, file_path in MORTGAGE_FILES.items():
+            try:
+                if os.path.exists(file_path):
+                    df = pd.read_excel(file_path)
+                    mortgage_data[data_type] = df
+                    mortgage_status[data_type] = {
+                        'status': 'success',
+                        'rows': len(df),
+                        'last_modified': datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                else:
+                    mortgage_data[data_type] = None
+                    mortgage_status[data_type] = {'status': 'missing', 'rows': 0, 'last_modified': 'N/A'}
+            except Exception as e:
+                mortgage_data[data_type] = None
+                mortgage_status[data_type] = {'status': 'error', 'error': str(e), 'rows': 0, 'last_modified': 'N/A'}
+        
+        return mortgage_data, mortgage_status
+
     def calculate_averages(df, columns, score_range=(1, 5), task_name=None):
         """Calculate average scores with proper filtering"""
         averages = []
@@ -277,6 +327,24 @@ if check_password():
         # Ensure we always have 6 models for consistent display
         while len(averages) < 6:
             averages.append(0)
+        
+        return averages
+
+    def calculate_mortgage_averages(df, columns, score_range=(1, 5)):
+        """Calculate average scores for mortgage models"""
+        averages = []
+        for col in columns:
+            if not col or col not in df.columns:
+                averages.append(0)
+                continue
+                
+            numeric_series = pd.to_numeric(df[col], errors='coerce')
+            if score_range == (1, 5):
+                valid_scores = numeric_series[(numeric_series >= 1) & (numeric_series <= 5)].dropna()
+            else:
+                valid_scores = numeric_series[(numeric_series >= 0) & (numeric_series <= 1)].dropna()
+            
+            averages.append(valid_scores.mean() if len(valid_scores) > 0 else 0)
         
         return averages
 
@@ -318,6 +386,84 @@ if check_password():
 
         return {'model': best_model, 'score': best_score}
 
+    def create_mortgage_judge_chart(mortgage_data):
+        """Create mortgage terms judge scores comparison chart"""
+        if mortgage_data is None or 'judge' not in mortgage_data or mortgage_data['judge'] is None:
+            return go.Figure()
+        
+        df = mortgage_data['judge']
+        judge_columns = ['Judge_LLaMA_Score', 'Judge_DPO_Score']
+        model_labels = [MORTGAGE_NAMES['LLaMA'], MORTGAGE_NAMES['DPO']]
+        
+        averages = calculate_mortgage_averages(df, judge_columns, (1, 5))
+        colors = [MORTGAGE_COLORS['LLaMA'], MORTGAGE_COLORS['DPO']]
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            name='Mortgage Terms',
+            x=model_labels,
+            y=averages,
+            marker_color=colors,
+            marker_line_color='white',
+            marker_line_width=2,
+            text=[f'{avg:.2f}' for avg in averages],
+            textposition='outside',
+            textfont=dict(size=12, color='black')
+        ))
+        
+        fig.update_layout(
+            title="Mortgage Terms - Judge Scores Comparison (1-5 Scale)",
+            xaxis_title="Models",
+            yaxis_title="Judge Score (1-5 Scale)",
+            yaxis=dict(range=[0, 5], dtick=0.5),
+            showlegend=False,
+            height=400,
+            template="plotly_white",
+            font=dict(size=10)
+        )
+        
+        return fig
+
+    def create_mortgage_bert_chart(mortgage_data):
+        """Create mortgage terms BERT F1 scores comparison chart"""
+        if mortgage_data is None or 'bert' not in mortgage_data or mortgage_data['bert'] is None:
+            return go.Figure()
+        
+        df = mortgage_data['bert']
+        bert_columns = ['BERTScore_LLaMA_F1', 'BERTScore_DPO_F1']
+        model_labels = [MORTGAGE_NAMES['LLaMA'], MORTGAGE_NAMES['DPO']]
+        
+        averages = calculate_mortgage_averages(df, bert_columns, (0, 1))
+        colors = [MORTGAGE_COLORS['LLaMA'], MORTGAGE_COLORS['DPO']]
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            name='Mortgage Terms',
+            x=model_labels,
+            y=averages,
+            marker_color=colors,
+            marker_line_color='white',
+            marker_line_width=2,
+            text=[f'{avg:.2f}' for avg in averages],
+            textposition='outside',
+            textfont=dict(size=12, color='black')
+        ))
+        
+        fig.update_layout(
+            title="Mortgage Terms - BERT F1 Scores",
+            xaxis_title="Models",
+            yaxis_title="BERT F1 Score",
+            yaxis=dict(range=[0.5, 0.8], dtick=0.05),
+            showlegend=False,
+            height=400,
+            template="plotly_white",
+            font=dict(size=10)
+        )
+        
+        return fig
+
     def create_judge_comparison_chart(datasets, specific_task=None):
         """Create judge scores comparison chart with full model names"""
         fig = go.Figure()
@@ -357,9 +503,9 @@ if check_password():
                 marker_color=task_colors.get(task, 'rgba(128, 128, 128, 0.8)'),
                 marker_line_color=border_colors.get(task, '#808080'),
                 marker_line_width=2,
-                text=[f'{avg:.2f}' for avg in averages],  # Show exact values with 2 decimal places
-                textposition='outside',  # Position text outside the bars
-                textfont=dict(size=10, color='black')  # Style the text
+                text=[f'{avg:.2f}' for avg in averages],
+                textposition='outside',
+                textfont=dict(size=10, color='black')
             ))
         
         fig.update_layout(
@@ -431,9 +577,9 @@ if check_password():
                     marker_color=colors,
                     marker_line_color='white',
                     marker_line_width=1,
-                    text=[f'{avg:.2f}' for avg in averages],  # Show exact values with 2 decimal places
-                    textposition='outside',  # Position text outside the bars
-                    textfont=dict(size=10, color='black')  # Style the text
+                    text=[f'{avg:.2f}' for avg in averages],
+                    textposition='outside',
+                    textfont=dict(size=10, color='black')
                 ))
             else:  # Overview page - keep task colors for comparison
                 task_colors = {
@@ -455,9 +601,9 @@ if check_password():
                     marker_color=task_colors.get(task, 'rgba(128, 128, 128, 0.8)'),
                     marker_line_color=border_colors.get(task, '#808080'),
                     marker_line_width=2,
-                    text=[f'{avg:.2f}' for avg in averages],  # Show exact values with 2 decimal places
-                    textposition='outside',  # Position text outside the bars
-                    textfont=dict(size=10, color='black')  # Style the text
+                    text=[f'{avg:.2f}' for avg in averages],
+                    textposition='outside',
+                    textfont=dict(size=10, color='black')
                 ))
         
         fig.update_layout(
@@ -465,14 +611,14 @@ if check_password():
             xaxis_title="Models",
             yaxis_title="BERT F1 Score",
             yaxis=dict(
-                range=[0.5, 0.8],  # Range from 0.5 to 0.8
-                dtick=0.05,  # Intervals of 0.05
+                range=[0.5, 0.8],
+                dtick=0.05,
                 tickmode='linear',
-                fixedrange=True,  # Prevent auto-scaling
-                autorange=False   # Disable auto-range
+                fixedrange=True,
+                autorange=False
             ),
             showlegend=not specific_task,
-            height=500,  # Increased height from 400 to 500
+            height=500,
             template="plotly_white",
             font=dict(size=9),
             xaxis=dict(tickangle=45)
@@ -522,9 +668,9 @@ if check_password():
                 opacity=0.8,
                 marker_line_color=MODEL_COLORS[model],
                 marker_line_width=2,
-                text=[f'{score:.2f}' for score in task_scores],  # Show exact values with 2 decimal places
-                textposition='outside',  # Position text outside the bars
-                textfont=dict(size=10, color='black')  # Style the text
+                text=[f'{score:.2f}' for score in task_scores],
+                textposition='outside',
+                textfont=dict(size=10, color='black')
             ))
         
         fig.update_layout(
@@ -548,18 +694,20 @@ if check_password():
     <div class="main-header">
         <h1>Multi-Model Evaluation Dashboard</h1>
         <p>Comprehensive Analysis with Judge Scores (1-5 Scale) & BERT F1 Scores</p>
-        <p><em>Evaluated for QnA, Summary and Classification Tasks on 6 models</em></p>
+        <p><em>Evaluated for QnA, Summary and Classification Tasks on 6 models + Mortgage Terms on 2 models</em></p>
     </div>
     """, unsafe_allow_html=True)
     
     # Load data from server
     datasets, file_status = load_data_from_server()
+    mortgage_data, mortgage_status = load_mortgage_data()
     
     # Data status display
     st.markdown('<div class="data-status">', unsafe_allow_html=True)
     st.markdown("### Data Status")
-    col1, col2, col3 = st.columns(3)
     
+    # Main datasets status
+    col1, col2, col3 = st.columns(3)
     for i, (task, status) in enumerate(file_status.items()):
         with [col1, col2, col3][i]:
             if status['status'] == 'success':
@@ -569,6 +717,21 @@ if check_password():
                 st.warning(f"⚠️ {task.upper()}: File not found")
             else:
                 st.error(f"❌ {task.upper()}: {status.get('error', 'Unknown error')}")
+    
+    # Mortgage datasets status
+    st.markdown("#### Mortgage Terms Data")
+    col4, col5 = st.columns(2)
+    mortgage_items = list(mortgage_status.items())
+    
+    for i, (data_type, status) in enumerate(mortgage_items):
+        with [col4, col5][i]:
+            if status['status'] == 'success':
+                st.success(f"✅ MORTGAGE {data_type.upper()}: {status['rows']} rows")
+                st.caption(f"Last updated: {status['last_modified']}")
+            elif status['status'] == 'missing':
+                st.warning(f"⚠️ MORTGAGE {data_type.upper()}: File not found")
+            else:
+                st.error(f"❌ MORTGAGE {data_type.upper()}: {status.get('error', 'Unknown error')}")
     
     # Refresh button
     if st.button("🔄 Refresh Data"):
@@ -581,18 +744,19 @@ if check_password():
     if any(df is not None for df in datasets.values()):
         # Summary Statistics
         st.markdown("### Summary Statistics")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         tasks_loaded = sum(1 for df in datasets.values() if df is not None)
         total_samples = sum(len(df) for df in datasets.values() if df is not None)
         best_model_info = calculate_best_overall_model(datasets)
+        mortgage_samples = sum(len(df) for df in mortgage_data.values() if df is not None)
         
         with col1:
             st.markdown(f"""
             <div class="metric-card">
                 <h4>Total Samples</h4>
                 <div class="metric-value">{total_samples:,}</div>
-                <div class="metric-label">Across All Tasks</div>
+                <div class="metric-label">Main Tasks</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -611,6 +775,15 @@ if check_password():
                 <h4>Best Overall Model</h4>
                 <div class="metric-value">{best_model_info['model']}</div>
                 <div class="metric-label">Based on Judge Score</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h4>Mortgage Samples</h4>
+                <div class="metric-value">{mortgage_samples//2 if mortgage_samples > 0 else 0}</div>
+                <div class="metric-label">Mortgage Terms</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -650,6 +823,23 @@ if check_password():
             
             # Task Performance Chart (only on overview)
             st.plotly_chart(create_task_comparison_chart(datasets), use_container_width=True)
+            
+            # Mortgage Terms Section (only on overview)
+            if any(df is not None for df in mortgage_data.values()):
+                st.markdown('<div class="mortgage-section">', unsafe_allow_html=True)
+                st.markdown("### 🏠 Mortgage Terms Model Evaluation")
+                st.markdown("**Additional evaluation on mortgage terminology with specialized models**")
+                
+                # Create two columns for mortgage charts
+                mort_col1, mort_col2 = st.columns(2)
+                
+                with mort_col1:
+                    st.plotly_chart(create_mortgage_judge_chart(mortgage_data), use_container_width=True)
+                
+                with mort_col2:
+                    st.plotly_chart(create_mortgage_bert_chart(mortgage_data), use_container_width=True)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
         
         # For individual tasks, show bert and judge charts vertically
         else:
@@ -661,6 +851,9 @@ if check_password():
         
         # Model Legend moved to bottom
         st.markdown("### Model Legend")
+        
+        # Main Models Legend
+        st.markdown("#### Main Evaluation Models")
         col1, col2 = st.columns(2)
         models_list = list(MODEL_NAMES.items())
         
@@ -672,7 +865,23 @@ if check_password():
                     <span><strong>{model}:</strong> {name}</span>
                 </div>
                 """, unsafe_allow_html=True)
+        
+        # Mortgage Models Legend (only show on overview)
+        if not task_filter and any(df is not None for df in mortgage_data.values()):
+            st.markdown("#### Mortgage Terms Models")
+            col3, col4 = st.columns(2)
+            mortgage_models_list = list(MORTGAGE_NAMES.items())
+            
+            for i, (model, name) in enumerate(mortgage_models_list):
+                with col3 if i % 2 == 0 else col4:
+                    st.markdown(f"""
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: {MORTGAGE_COLORS[model]};"></div>
+                        <span><strong>{model}:</strong> {name}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
     
     else:
-        st.warning("No data files found. Please ensure the following files exist in the project directory:")
-        st.info("• qa_data.xlsx\n• summary_data.xlsx\n• classification_data.xlsx")
+        st.warning("No data files found. Please ensure the following files exist:")
+        st.info("**Main Tasks:**\n• data/qa_data.xlsx\n• data/summary_data.xlsx\n• data/classification_data.xlsx")
+        st.info("**Mortgage Terms:**\n• mortgage_terms_judge_evaluation.xlsx\n• mortgage_terms_bertscore_evaluation.xlsx")
